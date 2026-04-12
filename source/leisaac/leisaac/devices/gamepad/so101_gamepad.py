@@ -43,7 +43,7 @@ class SO101Gamepad(Device):
         self.asset_name = "robot"
         self.robot_asset = self.env.scene[self.asset_name]
 
-        self.target_frame = "gripper"
+        self.target_frame = getattr(self.env.cfg, "teleop_target_frame", "gripper")
         body_idxs, _ = self.robot_asset.find_bodies(self.target_frame)
         self.target_frame_idx = body_idxs[0]
 

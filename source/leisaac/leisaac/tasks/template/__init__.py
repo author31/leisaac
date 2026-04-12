@@ -21,3 +21,13 @@ from .single_arm_env_cfg import (
     SingleArmTaskSceneCfg,
     SingleArmTerminationsCfg,
 )
+
+from .single_arm_franka_cfg import (
+    SingleArmFrankaActionsCfg,
+    SingleArmFrankaEventCfg,
+    SingleArmFrankaObservationsCfg,
+    SingleArmFrankaRewardsCfg,
+    SingleArmFrankaTaskEnvCfg,
+    SingleArmFrankaTaskSceneCfg,
+    SingleArmFrankaTerminationsCfg,
+)
