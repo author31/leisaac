@@ -135,7 +135,10 @@ def main():
 
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
     task_type = get_task_type(args_cli.task)
-    env_cfg.use_teleop_device(task_type)
+    robot_name = getattr(env_cfg, "robot_name", None)
+    policy_task_type = "franka_panda" if robot_name == "franka_panda" else task_type
+    teleop_device = "keyboard" if policy_task_type == "franka_panda" else task_type
+    env_cfg.use_teleop_device(teleop_device)
     env_cfg.seed = args_cli.seed if args_cli.seed is not None else int(time.time())
     env_cfg.episode_length_s = args_cli.episode_length_s
 
@@ -155,10 +158,10 @@ def main():
         from isaaclab.sensors import Camera
         from leisaac.policy import Gr00tServicePolicyClient
 
-        if task_type == "so101leader":
+        if policy_task_type == "so101leader":
             modality_keys = ["single_arm", "gripper"]
         else:
-            raise ValueError(f"Task type {task_type} not supported when using GR00T N1.5 policy yet.")
+            raise ValueError(f"Task type {policy_task_type} not supported when using GR00T N1.5 policy yet.")
 
         policy = Gr00tServicePolicyClient(
             host=args_cli.policy_host,
@@ -171,10 +174,10 @@ def main():
         from isaaclab.sensors import Camera
         from leisaac.policy import Gr00t16ServicePolicyClient
 
-        if task_type == "so101leader":
+        if policy_task_type == "so101leader":
             modality_keys = ["single_arm", "gripper"]
         else:
-            raise ValueError(f"Task type {task_type} not supported when using GR00T N1.5 policy yet.")
+            raise ValueError(f"Task type {policy_task_type} not supported when using GR00T N1.6 policy yet.")
 
         policy = Gr00t16ServicePolicyClient(
             host=args_cli.policy_host,
@@ -198,7 +201,7 @@ def main():
             camera_infos={
                 key: sensor.image_shape for key, sensor in env.scene.sensors.items() if isinstance(sensor, Camera)
             },
-            task_type=task_type,
+            task_type=policy_task_type,
             policy_type=policy_type,
             pretrained_name_or_path=args_cli.policy_checkpoint_path,
             actions_per_chunk=args_cli.policy_action_horizon,
@@ -212,7 +215,7 @@ def main():
             host=args_cli.policy_host,
             port=args_cli.policy_port,
             camera_keys=[key for key, sensor in env.scene.sensors.items() if isinstance(sensor, Camera)],
-            task_type=task_type,
+            task_type=policy_task_type,
         )
 
     rate_limiter = RateLimiter(args_cli.step_hz)
@@ -243,7 +246,7 @@ def main():
                 for i in range(min(args_cli.policy_action_horizon, actions.shape[0])):
                     action = actions[i, :, :]
                     if env.cfg.dynamic_reset_gripper_effort_limit:
-                        dynamic_reset_gripper_effort_limit_sim(env, task_type)
+                        dynamic_reset_gripper_effort_limit_sim(env, teleop_device)
                     obs_dict, _, reset_terminated, reset_time_outs, _ = env.step(action)
                     if reset_terminated[0]:
                         success = True

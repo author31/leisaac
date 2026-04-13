@@ -4,7 +4,7 @@ import time
 import grpc
 import numpy as np
 import torch
-from leisaac.utils.constant import SINGLE_ARM_JOINT_NAMES
+from leisaac.utils.constant import FRANKA_JOINT_NAMES, SINGLE_ARM_JOINT_NAMES
 from leisaac.utils.robot_utils import (
     convert_leisaac_action_to_lerobot,
     convert_lerobot_action_to_leisaac,
@@ -217,14 +217,21 @@ class LeRobotServicePolicyClient(Policy):
         self.actions_per_chunk = actions_per_chunk
 
         lerobot_features = {}
-        self.last_action = None
         if task_type == "so101leader":
-            lerobot_features["observation.state"] = {
-                "dtype": "float32",
-                "shape": (6,),
-                "names": [f"{joint_name}.pos" for joint_name in SINGLE_ARM_JOINT_NAMES],
-            }
-            self.last_action = np.zeros((1, 6))
+            self.state_joint_names = SINGLE_ARM_JOINT_NAMES
+            self.action_dim = len(SINGLE_ARM_JOINT_NAMES)
+        elif task_type == "franka_panda":
+            self.state_joint_names = FRANKA_JOINT_NAMES
+            self.action_dim = 8
+        else:
+            raise ValueError(f"Task type {task_type} not supported when using LeRobot policy yet.")
+
+        lerobot_features["observation.state"] = {
+            "dtype": "float32",
+            "shape": (len(self.state_joint_names),),
+            "names": [f"{joint_name}.pos" for joint_name in self.state_joint_names],
+        }
+        self.last_action = np.zeros((1, self.action_dim), dtype=np.float32)
         # TODO: add bi-arm support
 
         for camera_key, camera_image_shape in camera_infos.items():
@@ -273,8 +280,13 @@ class LeRobotServicePolicyClient(Policy):
 
         if self.task_type == "so101leader":
             joint_pos = convert_leisaac_action_to_lerobot(observation_dict["joint_pos"])
-            for joint_name in SINGLE_ARM_JOINT_NAMES:
-                raw_observation[f"{joint_name}.pos"] = joint_pos[0, SINGLE_ARM_JOINT_NAMES.index(joint_name)].item()
+        elif self.task_type == "franka_panda":
+            joint_pos = observation_dict["joint_pos"].cpu().numpy()
+        else:
+            raise ValueError(f"Task type {self.task_type} not supported when using LeRobot policy yet.")
+
+        for joint_index, joint_name in enumerate(self.state_joint_names):
+            raw_observation[f"{joint_name}.pos"] = joint_pos[0, joint_index].item()
         # TODO: add bi-arm support
 
         """
@@ -315,6 +327,29 @@ class LeRobotServicePolicyClient(Policy):
             return None
         return pickle.loads(actions_chunk.data)
 
+    def _convert_action_chunk(self, action_chunk) -> np.ndarray:
+        action_list = []
+        for action in action_chunk:
+            action_tensor = action.get_action()
+            if not isinstance(action_tensor, torch.Tensor):
+                action_tensor = torch.as_tensor(action_tensor)
+            action_list.append(action_tensor[None, :])
+
+        concat_action = torch.cat(action_list, dim=0)
+        if self.task_type == "so101leader":
+            concat_action = convert_lerobot_action_to_leisaac(concat_action)
+        elif self.task_type == "franka_panda":
+            concat_action = concat_action.detach().cpu().numpy()
+        else:
+            raise ValueError(f"Task type {self.task_type} not supported when using LeRobot policy yet.")
+
+        if concat_action.shape[-1] != self.action_dim:
+            raise ValueError(
+                f"Expected {self.action_dim} action values for task type {self.task_type}, "
+                f"got {concat_action.shape[-1]}."
+            )
+        return concat_action
+
     def get_action(self, observation_dict: dict) -> torch.Tensor:
         if not self.skip_send_observation:
             self._send_observation(observation_dict)
@@ -323,10 +358,7 @@ class LeRobotServicePolicyClient(Policy):
             self.skip_send_observation = True
             return torch.from_numpy(self.last_action).repeat(self.actions_per_chunk, 1)[:, None, :]
 
-        action_list = [action.get_action()[None, :] for action in action_chunk]
-        concat_action = torch.cat(action_list, dim=0)
-        concat_action = convert_lerobot_action_to_leisaac(concat_action)
-
+        concat_action = self._convert_action_chunk(action_chunk)
         self.last_action = concat_action[-1, :]
         self.skip_send_observation = False
 

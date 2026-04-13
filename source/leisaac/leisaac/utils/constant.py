@@ -50,3 +50,14 @@ LEKIWI_JOINT_NAMES = [
     "y",
     "theta",
 ]
+FRANKA_JOINT_NAMES = [
+    "panda_joint1",
+    "panda_joint2",
+    "panda_joint3",
+    "panda_joint4",
+    "panda_joint5",
+    "panda_joint6",
+    "panda_joint7",
+    "panda_finger_joint1",
+    "panda_finger_joint2",
+]

@@ -21,20 +21,9 @@ from isaaclab.utils.datasets.episode_data import EpisodeData
 from leisaac.assets.robots.franka import FRANKA_PANDA_CFG
 from leisaac.devices.action_process import preprocess_device_action as preprocess_device_action_common
 from leisaac.enhance.datasets.lerobot_dataset_handler import LeRobotDatasetCfg
+from leisaac.utils.constant import FRANKA_JOINT_NAMES
 
 from . import mdp
-
-FRANKA_JOINT_NAMES = [
-    "panda_joint1",
-    "panda_joint2",
-    "panda_joint3",
-    "panda_joint4",
-    "panda_joint5",
-    "panda_joint6",
-    "panda_joint7",
-    "panda_finger_joint1",
-    "panda_finger_joint2",
-]
 
 
 @configclass
