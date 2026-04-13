@@ -58,6 +58,8 @@ from isaaclab.sensors import Camera
 from isaaclab_tasks.utils import parse_env_cfg
 from lerobot.async_inference.helpers import raw_observation_to_observation
 from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+from lerobot.policies.utils import populate_queues
+from lerobot.utils.constants import ACTION, OBS_IMAGES
 
 from leisaac.utils.constant import FRANKA_JOINT_NAMES, SINGLE_ARM_JOINT_NAMES
 from leisaac.utils.env_utils import dynamic_reset_gripper_effort_limit_sim, get_task_type
@@ -178,6 +180,11 @@ class LeRobotSyncPolicy:
         )
         print("Local LeRobot policy is ready.")
 
+    def reset(self):
+        policy_reset = getattr(self.policy, "reset", None)
+        if callable(policy_reset):
+            policy_reset()
+
     def _build_lerobot_features(self, camera_infos: dict[str, tuple[int, int]]) -> dict[str, dict]:
         features = {
             "observation.state": {
@@ -234,8 +241,43 @@ class LeRobotSyncPolicy:
             _print_mapping_shapes("[SyncPolicy] Preprocessed observation:", observation)
         return observation
 
+    def _is_diffusion_policy(self) -> bool:
+        return (
+            getattr(self.policy, "name", None) == "diffusion"
+            or self.policy.__class__.__name__ == "DiffusionPolicy"
+        )
+
+    def _predict_diffusion_action_chunk(self, observation: dict[str, Any]) -> torch.Tensor:
+        batch = dict(observation)
+        batch.pop(ACTION, None)
+
+        image_features = getattr(self.policy.config, "image_features", None)
+        if image_features:
+            missing_image_features = [key for key in image_features if key not in batch]
+            if missing_image_features:
+                raise KeyError(
+                    "Diffusion policy expects image observation keys that are missing after preprocessing: "
+                    f"{missing_image_features}. Available keys: {sorted(batch.keys())}."
+                )
+            batch[OBS_IMAGES] = torch.stack([batch[key] for key in image_features], dim=-4)
+
+        if getattr(self.policy, "_queues", None) is None:
+            self.policy.reset()
+
+        self.policy._queues = populate_queues(self.policy._queues, batch)
+        if self.debug_policy_shapes:
+            queue_summary = ", ".join(
+                f"{key}=len:{len(queue)}/max:{queue.maxlen}" for key, queue in sorted(self.policy._queues.items())
+            )
+            print(f"[SyncPolicy] Diffusion queues after populate: {queue_summary}")
+
+        return self.policy.predict_action_chunk(batch)
+
     def _predict_lerobot_actions(self, observation: dict[str, Any]) -> torch.Tensor:
-        action_tensor = self.policy.predict_action_chunk(observation)
+        if self._is_diffusion_policy():
+            action_tensor = self._predict_diffusion_action_chunk(observation)
+        else:
+            action_tensor = self.policy.predict_action_chunk(observation)
         if not isinstance(action_tensor, torch.Tensor):
             action_tensor = torch.as_tensor(action_tensor, device=self.device)
 
@@ -366,6 +408,7 @@ def main():
                 if controller.reset_state:
                     controller.reset()
                     obs_dict, _ = env.reset()
+                    policy.reset()
                     episode_count += 1
                     break
 
@@ -388,10 +431,12 @@ def main():
                 print(f"[Evaluation] Episode {episode_count} is successful!")
                 episode_count += 1
                 success_count += 1
+                policy.reset()
                 break
             if time_out:
                 print(f"[Evaluation] Episode {episode_count} timed out!")
                 episode_count += 1
+                policy.reset()
                 break
         print(
             f"[Evaluation] now success rate: {success_count / (episode_count - 1)} "
