@@ -127,6 +127,9 @@ class SingleArmFrankaObservationsCfg:
         wrist = ObsTerm(
             func=mdp.image, params={"sensor_cfg": SceneEntityCfg("wrist"), "data_type": "rgb", "normalize": False}
         )
+        front = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("front"), "data_type": "rgb", "normalize": False}
+        )
         ee_frame_state = ObsTerm(
             func=mdp.ee_frame_state,
             params={"ee_frame_cfg": SceneEntityCfg("ee_frame"), "robot_cfg": SceneEntityCfg("robot")},

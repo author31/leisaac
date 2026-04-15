@@ -128,16 +128,16 @@ class CupStackingEnvCfg(SingleArmFrankaTaskEnvCfg):
                 randomize_object_uniform(
                     "blue_cup",
                     pose_range={
-                        "x": (0.0, 0.0), 
-                        "y": (0.0, 0.0),
+                        "x": (0.05, -0.05), 
+                        "y": (0.0, -0.05),
                         "z": (0.0, 0.0),
                     },
                 ),
                 randomize_object_uniform(
                     "pink_cup", 
                     pose_range={
-                        "x": (0.0, 0.0),
-                        "y": (0.0, 0.0),
+                        "x": (0.05, -0.05), 
+                        "y": (0.0, -0.05),
                         "z": (0.0, 0.0),
                     },
                 ),

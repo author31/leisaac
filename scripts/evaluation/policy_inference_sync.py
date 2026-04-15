@@ -10,11 +10,17 @@ import argparse
 
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="Synchronous LeRobot inference for LeIsaac simulation.")
+parser = argparse.ArgumentParser(
+    description="Synchronous LeRobot inference for LeIsaac simulation."
+)
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument("--step_hz", type=int, default=60, help="Environment stepping rate in Hz.")
+parser.add_argument(
+    "--step_hz", type=int, default=60, help="Environment stepping rate in Hz."
+)
 parser.add_argument("--seed", type=int, default=None, help="Seed of the environment.")
-parser.add_argument("--episode_length_s", type=float, default=60.0, help="Episode length in seconds.")
+parser.add_argument(
+    "--episode_length_s", type=float, default=60.0, help="Episode length in seconds."
+)
 parser.add_argument(
     "--eval_rounds",
     type=int,
@@ -30,9 +36,24 @@ parser.add_argument(
     default="lerobot-smolvla",
     help="Local LeRobot policy type. Use lerobot-<model_type>, for example lerobot-smolvla.",
 )
-parser.add_argument("--policy_action_horizon", type=int, default=16, help="Number of actions to execute per policy call.")
-parser.add_argument("--policy_language_instruction", type=str, default=None, help="Language instruction of the policy.")
-parser.add_argument("--policy_checkpoint_path", type=str, required=True, help="Path to the local LeRobot checkpoint.")
+parser.add_argument(
+    "--policy_action_horizon",
+    type=int,
+    default=16,
+    help="Number of actions to execute per policy call.",
+)
+parser.add_argument(
+    "--policy_language_instruction",
+    type=str,
+    default=None,
+    help="Language instruction of the policy.",
+)
+parser.add_argument(
+    "--policy_checkpoint_path",
+    type=str,
+    required=True,
+    help="Path to the local LeRobot checkpoint.",
+)
 parser.add_argument(
     "--debug_policy_shapes",
     action="store_true",
@@ -62,8 +83,14 @@ from lerobot.policies.utils import populate_queues
 from lerobot.utils.constants import ACTION, OBS_IMAGES
 
 from leisaac.utils.constant import FRANKA_JOINT_NAMES, SINGLE_ARM_JOINT_NAMES
-from leisaac.utils.env_utils import dynamic_reset_gripper_effort_limit_sim, get_task_type
-from leisaac.utils.robot_utils import convert_leisaac_action_to_lerobot, convert_lerobot_action_to_leisaac
+from leisaac.utils.env_utils import (
+    dynamic_reset_gripper_effort_limit_sim,
+    get_task_type,
+)
+from leisaac.utils.robot_utils import (
+    convert_leisaac_action_to_lerobot,
+    convert_lerobot_action_to_leisaac,
+)
 
 import leisaac  # noqa: F401
 
@@ -101,8 +128,14 @@ class Controller:
         self.reset_state = False
 
     def __del__(self):
-        if hasattr(self, "_input") and hasattr(self, "_keyboard") and hasattr(self, "_keyboard_sub"):
-            self._input.unsubscribe_from_keyboard_events(self._keyboard, self._keyboard_sub)
+        if (
+            hasattr(self, "_input")
+            and hasattr(self, "_keyboard")
+            and hasattr(self, "_keyboard_sub")
+        ):
+            self._input.unsubscribe_from_keyboard_events(
+                self._keyboard, self._keyboard_sub
+            )
             self._keyboard_sub = None
 
     def reset(self):
@@ -143,7 +176,9 @@ class LeRobotSyncPolicy:
         debug_policy_shapes: bool = False,
     ):
         if actions_per_chunk <= 0:
-            raise ValueError(f"policy_action_horizon must be positive, got {actions_per_chunk}.")
+            raise ValueError(
+                f"policy_action_horizon must be positive, got {actions_per_chunk}."
+            )
 
         self.task_type = task_type
         self.actions_per_chunk = actions_per_chunk
@@ -157,12 +192,16 @@ class LeRobotSyncPolicy:
             self.state_joint_names = FRANKA_JOINT_NAMES
             self.action_dim = 8
         else:
-            raise ValueError(f"Task type {task_type} not supported for synchronous LeRobot inference yet.")
+            raise ValueError(
+                f"Task type {task_type} not supported for synchronous LeRobot inference yet."
+            )
 
         self.lerobot_features = self._build_lerobot_features(camera_infos)
         self.camera_keys = list(camera_infos.keys())
 
-        print(f"Loading local LeRobot policy '{policy_type}' from {pretrained_name_or_path}...")
+        print(
+            f"Loading local LeRobot policy '{policy_type}' from {pretrained_name_or_path}..."
+        )
         policy_class = get_policy_class(policy_type)
         self.policy = policy_class.from_pretrained(pretrained_name_or_path)
         self.policy.to(device)
@@ -185,7 +224,9 @@ class LeRobotSyncPolicy:
         if callable(policy_reset):
             policy_reset()
 
-    def _build_lerobot_features(self, camera_infos: dict[str, tuple[int, int]]) -> dict[str, dict]:
+    def _build_lerobot_features(
+        self, camera_infos: dict[str, tuple[int, int]]
+    ) -> dict[str, dict]:
         features = {
             "observation.state": {
                 "dtype": "float32",
@@ -203,7 +244,8 @@ class LeRobotSyncPolicy:
 
     def _build_raw_observation(self, observation_dict: dict) -> dict[str, Any]:
         raw_observation = {
-            key: observation_dict[key].cpu().numpy().astype(np.uint8)[0] for key in self.camera_keys
+            key: observation_dict[key].cpu().numpy().astype(np.uint8)[0]
+            for key in self.camera_keys
         }
         raw_observation["task"] = observation_dict["task_description"]
 
@@ -212,7 +254,9 @@ class LeRobotSyncPolicy:
         elif self.task_type == "franka_panda":
             joint_pos = observation_dict["joint_pos"].cpu().numpy()
         else:
-            raise ValueError(f"Task type {self.task_type} not supported for synchronous LeRobot inference yet.")
+            raise ValueError(
+                f"Task type {self.task_type} not supported for synchronous LeRobot inference yet."
+            )
 
         for joint_index, joint_name in enumerate(self.state_joint_names):
             raw_observation[f"{joint_name}.pos"] = joint_pos[0, joint_index].item()
@@ -241,84 +285,20 @@ class LeRobotSyncPolicy:
             _print_mapping_shapes("[SyncPolicy] Preprocessed observation:", observation)
         return observation
 
-    def _is_diffusion_policy(self) -> bool:
-        return (
-            getattr(self.policy, "name", None) == "diffusion"
-            or self.policy.__class__.__name__ == "DiffusionPolicy"
-        )
-
-    def _predict_diffusion_action_chunk(self, observation: dict[str, Any]) -> torch.Tensor:
-        batch = dict(observation)
-        batch.pop(ACTION, None)
-
-        image_features = getattr(self.policy.config, "image_features", None)
-        if image_features:
-            missing_image_features = [key for key in image_features if key not in batch]
-            if missing_image_features:
-                raise KeyError(
-                    "Diffusion policy expects image observation keys that are missing after preprocessing: "
-                    f"{missing_image_features}. Available keys: {sorted(batch.keys())}."
-                )
-            batch[OBS_IMAGES] = torch.stack([batch[key] for key in image_features], dim=-4)
-
-        if getattr(self.policy, "_queues", None) is None:
-            self.policy.reset()
-
-        self.policy._queues = populate_queues(self.policy._queues, batch)
-        if self.debug_policy_shapes:
-            queue_summary = ", ".join(
-                f"{key}=len:{len(queue)}/max:{queue.maxlen}" for key, queue in sorted(self.policy._queues.items())
-            )
-            print(f"[SyncPolicy] Diffusion queues after populate: {queue_summary}")
-
-        return self.policy.predict_action_chunk(batch)
-
     def _predict_lerobot_actions(self, observation: dict[str, Any]) -> torch.Tensor:
-        if self._is_diffusion_policy():
-            action_tensor = self._predict_diffusion_action_chunk(observation)
-        else:
-            action_tensor = self.policy.predict_action_chunk(observation)
-        if not isinstance(action_tensor, torch.Tensor):
-            action_tensor = torch.as_tensor(action_tensor, device=self.device)
-
-        raw_shape = tuple(action_tensor.shape)
-        if action_tensor.ndim == 1:
-            action_tensor = action_tensor.view(1, 1, -1)
-        elif action_tensor.ndim == 2:
-            action_tensor = action_tensor.unsqueeze(0)
-        elif action_tensor.ndim != 3:
-            raise RuntimeError(f"Expected policy action chunk with 1, 2, or 3 dims, got shape {raw_shape}.")
-
-        action_tensor = action_tensor[:, : self.actions_per_chunk, :]
-        if self.debug_policy_shapes:
-            print(f"[SyncPolicy] Raw predicted action shape: {raw_shape}")
-            print(f"[SyncPolicy] Sliced predicted action shape: {tuple(action_tensor.shape)}")
-
-        if action_tensor.shape[1] == 0:
-            raise RuntimeError(
-                "LeRobot policy returned zero action timesteps. "
-                f"policy_action_horizon={self.actions_per_chunk}, raw_action_shape={raw_shape}, "
-                f"sliced_action_shape={tuple(action_tensor.shape)}, "
-                f"policy_config=({self._config_horizon_summary()})"
-            )
-
-        processed_actions = []
-        for action_index in range(action_tensor.shape[1]):
-            single_action = action_tensor[:, action_index, :]
-            processed_actions.append(self.postprocessor(single_action))
-
-        action_tensor = torch.stack(processed_actions, dim=1).squeeze(0).detach().cpu()
-        if self.debug_policy_shapes:
-            print(f"[SyncPolicy] Postprocessed action shape: {tuple(action_tensor.shape)}")
-        return action_tensor
+        with torch.inference_mode():
+            action = self.policy.select_action(observation)
+        return self.postprocessor(action)
 
     def _convert_actions_to_leisaac(self, action_tensor: torch.Tensor) -> np.ndarray:
         if self.task_type == "so101leader":
             actions = convert_lerobot_action_to_leisaac(action_tensor)
         elif self.task_type == "franka_panda":
-            actions = action_tensor.numpy()
+            actions = action_tensor.to("cpu").numpy()
         else:
-            raise ValueError(f"Task type {self.task_type} not supported for synchronous LeRobot inference yet.")
+            raise ValueError(
+                f"Task type {self.task_type} not supported for synchronous LeRobot inference yet."
+            )
 
         if actions.shape[-1] != self.action_dim:
             raise ValueError(
@@ -351,7 +331,9 @@ def get_policy_type(policy_type_arg: str) -> str:
     return policy_type_arg.split("lerobot-", 1)[1]
 
 
-def get_camera_infos(env: ManagerBasedRLEnv, policy_obs_dict: dict) -> dict[str, tuple[int, int]]:
+def get_camera_infos(
+    env: ManagerBasedRLEnv, policy_obs_dict: dict
+) -> dict[str, tuple[int, int]]:
     camera_infos = {}
     for key, sensor in env.scene.sensors.items():
         if isinstance(sensor, Camera) and key in policy_obs_dict:
@@ -412,9 +394,13 @@ def main():
                     episode_count += 1
                     break
 
-                policy_obs_dict = preprocess_obs_dict(obs_dict["policy"], language_instruction)
+                policy_obs_dict = preprocess_obs_dict(
+                    obs_dict["policy"], language_instruction
+                )
                 actions = policy.get_action(policy_obs_dict).to(env.device)
-                for action_index in range(min(args_cli.policy_action_horizon, actions.shape[0])):
+                for action_index in range(
+                    min(args_cli.policy_action_horizon, actions.shape[0])
+                ):
                     action = actions[action_index, :, :]
                     if env.cfg.dynamic_reset_gripper_effort_limit:
                         dynamic_reset_gripper_effort_limit_sim(env, teleop_device)

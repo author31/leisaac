@@ -25,7 +25,8 @@ _MAX_ROT_DELTA = 0.08
 _HOVER_Z_OFFSET = 0.15
 _GRASP_Z_OFFSET = 0.08
 _LIFT_Z_OFFSET = 0.2
-_GRIPPER_DOWN_RPY_W = (math.pi, 0.0, 0.0)
+_GRIPPER_DOWN_ROLL_W = math.pi
+_GRIPPER_DOWN_PITCH_W = 0.0
 
 _SUCCESS_X_RANGE = (-0.05, 0.05)
 _SUCCESS_Y_RANGE = (-0.05, 0.05)
@@ -102,14 +103,15 @@ class CupStackingStateMachine(StateMachineBase):
         self._pink_above_target_w: torch.Tensor | None = None
         self._pink_stack_target_w: torch.Tensor | None = None
         self._pink_retreat_target_w: torch.Tensor | None = None
+        self._gripper_down_yaw_w: torch.Tensor | None = None
         self._event: int = 0
         self._events_dt = [
             160,  # Phase 0: Move above the blue cup
-            100,  # Phase 1: Approach down to the blue cup
-            120,  # Phase 2: Close gripper to grasp
+            80,  # Phase 1: Approach down to the blue cup
+            20,  # Phase 2: Close gripper to grasp
             100,  # Phase 3: Lift blue cup upward
-            150,  # Phase 4: Move blue cup above the pink cup
-            100,  # Phase 5: Lower/place and release
+            80,  # Phase 4: Move blue cup above the pink cup
+            30,  # Phase 5: Lower/place and release
             80,  # Phase 6: Move up and away
         ]
 
@@ -166,7 +168,7 @@ class CupStackingStateMachine(StateMachineBase):
             if self._event == 0:
                 self._initial_ee_pos_w = self._ee_pos_w(robot).clone()
 
-        target_quat_w = self._gripper_down_quat_w(num_envs, device, robot.data.root_quat_w.dtype)
+        target_quat_w = self._gripper_down_quat_w(robot, num_envs, device, robot.data.root_quat_w.dtype)
         if self._event == 0:
             target_pos_w, gripper_cmd = self._phase_move_above_target(blue_cup_pos_w, num_envs, device)
         elif self._event == 1:
@@ -247,6 +249,7 @@ class CupStackingStateMachine(StateMachineBase):
         self._pink_above_target_w = None
         self._pink_stack_target_w = None
         self._pink_retreat_target_w = None
+        self._gripper_down_yaw_w = None
 
     # ------------------------------------------------------------------
     def _ee_pos_w(self, robot) -> torch.Tensor:
@@ -280,11 +283,31 @@ class CupStackingStateMachine(StateMachineBase):
         base_joint_delta = torch.zeros(env.num_envs, 1, device=env.device, dtype=delta_pos_root.dtype)
         return torch.cat([delta_pos_root, delta_rot_root, base_joint_delta, gripper_cmd], dim=-1)
 
-    def _gripper_down_quat_w(self, num_envs: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-        roll = torch.full((num_envs,), _GRIPPER_DOWN_RPY_W[0], device=device, dtype=dtype)
-        pitch = torch.full((num_envs,), _GRIPPER_DOWN_RPY_W[1], device=device, dtype=dtype)
-        yaw = torch.full((num_envs,), _GRIPPER_DOWN_RPY_W[2], device=device, dtype=dtype)
+    def _gripper_down_quat_w(
+        self, robot, num_envs: int, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
+        if self._gripper_down_yaw_w is None or self._gripper_down_yaw_w.shape[0] != num_envs:
+            self._gripper_down_yaw_w = self._current_hand_heading_yaw_w(robot).clone()
+
+        roll = torch.full((num_envs,), _GRIPPER_DOWN_ROLL_W, device=device, dtype=dtype)
+        pitch = torch.full((num_envs,), _GRIPPER_DOWN_PITCH_W, device=device, dtype=dtype)
+        yaw = self._gripper_down_yaw_w.to(device=device, dtype=dtype)
         return quat_from_euler_xyz(roll, pitch, yaw)
+
+    def _current_hand_heading_yaw_w(self, robot) -> torch.Tensor:
+        quat_w = self._ee_quat_w(robot)
+        local_x = torch.zeros(quat_w.shape[0], 3, device=quat_w.device, dtype=quat_w.dtype)
+        local_y = torch.zeros_like(local_x)
+        local_x[:, 0] = 1.0
+        local_y[:, 1] = 1.0
+
+        hand_x_w = quat_apply(quat_w, local_x)
+        hand_y_w = quat_apply(quat_w, local_y)
+        yaw_from_x = torch.atan2(hand_x_w[:, 1], hand_x_w[:, 0])
+        yaw_from_y = torch.atan2(hand_y_w[:, 0], -hand_y_w[:, 1])
+
+        x_is_horizontal = torch.linalg.norm(hand_x_w[:, :2], dim=-1) > 1e-4
+        return torch.where(x_is_horizontal, yaw_from_x, yaw_from_y)
 
     # ------------------------------------------------------------------
     # Properties
