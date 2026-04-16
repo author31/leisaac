@@ -25,6 +25,18 @@ from leisaac.utils.constant import FRANKA_JOINT_NAMES
 
 from . import mdp
 
+def euler_deg_to_quat(x, y, z):
+    import math
+    import torch
+    from isaaclab.utils.math import quat_from_euler_xyz
+
+    q = quat_from_euler_xyz(
+        torch.tensor([math.radians(x)], dtype=torch.float32),
+        torch.tensor([math.radians(y)], dtype=torch.float32),
+        torch.tensor([math.radians(z)], dtype=torch.float32),
+    )[0]
+    return tuple(float(v) for v in q)
+
 
 @configclass
 class SingleArmFrankaTaskSceneCfg(InteractiveSceneCfg):
@@ -63,13 +75,13 @@ class SingleArmFrankaTaskSceneCfg(InteractiveSceneCfg):
     )
 
     front: TiledCameraCfg = TiledCameraCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/front_camera",
+        prim_path="{ENV_REGEX_NS}/Scene/front_camera",
         offset=TiledCameraCfg.OffsetCfg(
-            pos=(1.2, -1.5, 0.5), rot=(0.6845838, -0.6845838, -0.1770454, 0.1770454), convention="ros"
+            pos=(0.4, 3.3, 0.6), rot=euler_deg_to_quat(-90, 0, -180), convention="ros"
         ),
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=28.7,
+            focal_length=55,
             focus_distance=400.0,
             horizontal_aperture=38.11,  # For a 78° FOV (assuming square image)
             clipping_range=(0.01, 50.0),
@@ -78,24 +90,6 @@ class SingleArmFrankaTaskSceneCfg(InteractiveSceneCfg):
         width=640,
         height=480,
         update_period=1 / 30.0,  # 30FPS
-    )
-
-    wrist: TiledCameraCfg = TiledCameraCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/panda_link7/wrist_camera",
-        offset=TiledCameraCfg.OffsetCfg(
-            pos=(0.0, 0.0, 0.3), rot=(0.0, 1.0, 0.0, 0.0), convention="opengl"
-        ),
-        data_types=["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=11.0,
-            focus_distance=400.0,
-            horizontal_aperture=36.83,  # For a 75° FOV (assuming square image)
-            clipping_range=(0.01, 50.0),
-            lock_camera=True,
-        ),
-        width=640,
-        height=480,
-        update_period=1 / 30.0,
     )
 
     light = AssetBaseCfg(
@@ -124,15 +118,8 @@ class SingleArmFrankaObservationsCfg:
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel)
         actions = ObsTerm(func=mdp.last_action)
-        wrist = ObsTerm(
-            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("wrist"), "data_type": "rgb", "normalize": False}
-        )
         front = ObsTerm(
             func=mdp.image, params={"sensor_cfg": SceneEntityCfg("front"), "data_type": "rgb", "normalize": False}
-        )
-        ee_frame_state = ObsTerm(
-            func=mdp.ee_frame_state,
-            params={"ee_frame_cfg": SceneEntityCfg("ee_frame"), "robot_cfg": SceneEntityCfg("robot")},
         )
         joint_pos_target = ObsTerm(func=mdp.joint_pos_target, params={"asset_cfg": SceneEntityCfg("robot")})
 

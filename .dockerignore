@@ -14,13 +14,20 @@ docs/
 **/videos/*
 *.tmp
 # ignore docker
+Dockerfile
+.dockerignore
 docker/cluster/exports/
 docker/.container.cfg
 # ignore recordings
 recordings/
+# ignore local datasets
+datasets/
 # ignore __pycache__
 **/__pycache__/
 **/*.egg-info/
+# ignore local virtual environments
+.venv/
+venv/
 # ignore isaac sim symlink
 _isaac_sim?
 # Docker history
