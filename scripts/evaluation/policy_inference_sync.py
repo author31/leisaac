@@ -203,7 +203,7 @@ class LeRobotSyncPolicy:
             f"Loading local LeRobot policy '{policy_type}' from {pretrained_name_or_path}..."
         )
         policy_class = get_policy_class(policy_type)
-        self.policy = policy_class.from_pretrained(pretrained_name_or_path)
+        self.policy = policy_class.from_pretrained(pretrained_name_or_path, local_files_only=True)
         self.policy.to(device)
         self.policy.eval()
 
