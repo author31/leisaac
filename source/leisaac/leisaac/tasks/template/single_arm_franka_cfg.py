@@ -74,10 +74,28 @@ class SingleArmFrankaTaskSceneCfg(InteractiveSceneCfg):
         ],
     )
 
-    front: TiledCameraCfg = TiledCameraCfg(
-        prim_path="{ENV_REGEX_NS}/Scene/front_camera",
+    wrist: TiledCameraCfg = TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/panda_hand/wrist",
         offset=TiledCameraCfg.OffsetCfg(
-            pos=(0.4, 3.3, 0.6), rot=euler_deg_to_quat(-90, 0, -180), convention="ros"
+            pos=(0.04, 0.0, 0.0), rot=(0.707, 0, 0, 0.707), convention="ros"
+        ),
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24,
+            focus_distance=400.0,
+            horizontal_aperture=38.11,  # For a 78° FOV (assuming square image)
+            clipping_range=(0.01, 50.0),
+            lock_camera=True,
+        ),
+        width=84,
+        height=84,
+        update_period=1 / 30.0,  # 30FPS
+    )
+
+    front: TiledCameraCfg = TiledCameraCfg(
+        prim_path="/World/front_camera",
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=(0.35, 1.1, 0.6), rot=(0.0, -0.0, -0.60182, -0.79864), convention="opengl"
         ),
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
@@ -118,6 +136,9 @@ class SingleArmFrankaObservationsCfg:
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel)
         actions = ObsTerm(func=mdp.last_action)
+        wrist = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("wrist"), "data_type": "rgb", "normalize": False}
+        )
         front = ObsTerm(
             func=mdp.image, params={"sensor_cfg": SceneEntityCfg("front"), "data_type": "rgb", "normalize": False}
         )
