@@ -8,10 +8,10 @@ launch-isaaclab:
 	trap 'xhost -local:root >/dev/null' EXIT; \
 	docker run --rm -it \
 		--name isaaclab \
+		--runtime=nvidia \
 		--gpus all \
 		--net=host \
 		--ipc=host \
-		--privileged \
 		-v $(shell pwd):/workspace/leisaac \
 		-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
 		-e DISPLAY=$$DISPLAY \
@@ -19,24 +19,33 @@ launch-isaaclab:
 		-e PRIVACY_CONSENT=Y \
 		-e QT_X11_NO_MITSHM=1 \
 		-e NVIDIA_VISIBLE_DEVICES=all \
-		-e NVIDIA_DRIVER_CAPABILITIES=all \
-		-e VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json \
+		-e NVIDIA_DRIVER_CAPABILITIES=graphics,display,utility,compute \
 		$(IMAGE) \
 		bash -lc ' \
 			set -e; \
-			for icd in /etc/vulkan/icd.d/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json; do \
+			echo "== GPU check =="; \
+			nvidia-smi || true; \
+			echo "== Vulkan ICD candidates =="; \
+			ls -l /etc/vulkan/icd.d /usr/share/vulkan/icd.d 2>/dev/null || true; \
+			unset VK_ICD_FILENAMES; \
+			for icd in \
+				/usr/share/vulkan/icd.d/nvidia_icd.json \
+				/etc/vulkan/icd.d/nvidia_icd.json \
+				/usr/share/vulkan/icd.d/nvidia_layers.json \
+				/etc/vulkan/icd.d/nvidia_layers.json; do \
 				if [ -f "$$icd" ]; then \
 					export VK_ICD_FILENAMES="$$icd"; \
-					echo "Using NVIDIA Vulkan ICD: $$VK_ICD_FILENAMES"; \
+					echo "Using Vulkan ICD: $$VK_ICD_FILENAMES"; \
 					break; \
 				fi; \
 			done; \
 			if [ -z "$${VK_ICD_FILENAMES:-}" ]; then \
-				echo "Warning: NVIDIA Vulkan ICD was not found under /etc/vulkan/icd.d or /usr/share/vulkan/icd.d" >&2; \
+				echo "No NVIDIA Vulkan ICD JSON found in container."; \
+				echo "Check host nvidia-container-toolkit installation."; \
 			fi; \
 			for lib in libGLU.so.1 libXt.so.6; do \
 				if ! ldconfig -p | grep -q "$$lib"; then \
-					echo "$$lib is missing from the image. Rebuild with: docker build -t $(IMAGE) ." >&2; \
+					echo "$$lib is missing from the image." >&2; \
 					exit 1; \
 				fi; \
 			done; \
