@@ -87,8 +87,8 @@ class SingleArmFrankaTaskSceneCfg(InteractiveSceneCfg):
             clipping_range=(0.01, 50.0),
             lock_camera=True,
         ),
-        width=84,
-        height=84,
+        width=640,
+        height=480,
         update_period=1 / 30.0,  # 30FPS
     )
 

@@ -69,6 +69,11 @@ simulation_app = app_launcher.app
 import time
 from typing import Any
 
+
+import omni.ui as ui
+import omni.kit.app
+import omni.kit.viewport.utility as vp_util
+
 import carb
 import gymnasium as gym
 import numpy as np
@@ -93,6 +98,54 @@ from leisaac.utils.robot_utils import (
 )
 
 import leisaac  # noqa: F401
+
+
+def setup_dual_viewports():
+    """Setup dual viewports: main perspective view and GoPro camera view."""
+    perspective_path = "/World/envs/env_0/Robot/panda_hand/wrist"
+
+    # Get main viewport window
+    v1_window = ui.Workspace.get_window("Viewport")
+    if not v1_window:
+        print("Error: Main viewport window not found")
+        return
+
+    v1_api = vp_util.get_viewport_from_window_name("Viewport")
+    if v1_api:
+        v1_api.camera_path = perspective_path
+
+    # Get or create secondary viewport window
+    v2_window = ui.Workspace.get_window("Viewport 2")
+    if not v2_window:
+        v2_window = vp_util.create_viewport_window("Viewport 2")
+        # Important: Wait for UI to register the new window
+        omni.kit.app.get_app().update()  # Synchronous frame update
+
+    v2_api = vp_util.get_viewport_from_window_name("Viewport 2")
+    if v2_api:
+        v2_api.camera_path = f"/World/front_camera"
+
+    # Ensure both windows exist before docking
+    if v1_window and v2_window:
+        # Wait for UI to stabilize before docking
+        omni.kit.app.get_app().update()
+
+        # Attempt docking with error handling
+        try:
+            v2_window.dock_in(v1_window, ui.DockPosition.RIGHT)
+            print("Viewports docked: [Viewport (Persp)] | [Viewport 2 (Camera)]")
+        except Exception as e:
+            print(f"Docking failed: {str(e)}")
+            # Alternative docking approach if direct docking fails
+            try:
+                # Try docking after another frame
+                omni.kit.app.get_app().update()
+                v2_window.dock_in(v1_window, ui.DockPosition.RIGHT)
+                print("Viewports docked on second attempt")
+            except Exception as e2:
+                print(f"Second docking attempt failed: {str(e2)}")
+    else:
+        print("Error: Could not find one or both viewport windows for docking.")
 
 
 class RateLimiter:
@@ -380,6 +433,7 @@ def main():
     rate_limiter = RateLimiter(args_cli.step_hz)
     controller = Controller()
     controller.reset()
+
 
     success_count, episode_count = 0, 1
     while max_episode_count <= 0 or episode_count <= max_episode_count:

@@ -37,7 +37,7 @@ class CupStackingSceneCfg(SingleArmFrankaTaskSceneCfg):
             usd_path=str(KITCHEN_OBJECTS_ROOT / "BlueCup" / "BlueCup.usd"),
             mass_props=MassPropertiesCfg(mass=0.1),
         ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.36, -0.3, 0.12), rot=(1.0, 0.0, 0.0, 0.0)),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.36, -0.4, 0.12), rot=(1.0, 0.0, 0.0, 0.0)),
     )
 
     pink_cup: RigidObjectCfg = RigidObjectCfg(
@@ -128,16 +128,16 @@ class CupStackingEnvCfg(SingleArmFrankaTaskEnvCfg):
                 randomize_object_uniform(
                     "blue_cup",
                     pose_range={
-                        "x": (0.05, -0.05), 
-                        "y": (0.0, -0.05),
+                        "x": (0.02, -0.02), 
+                        "y": (0.0, 0.0),
                         "z": (0.0, 0.0),
                     },
                 ),
                 randomize_object_uniform(
                     "pink_cup", 
                     pose_range={
-                        "x": (0.05, -0.05), 
-                        "y": (0.0, -0.05),
+                        "x": (0.0, 0.00), 
+                        "y": (0.0, 0.0),
                         "z": (0.0, 0.0),
                     },
                 ),
