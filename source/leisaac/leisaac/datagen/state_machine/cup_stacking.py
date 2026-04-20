@@ -15,12 +15,16 @@ from .base import StateMachineBase
 _BLUE_CUP_NAME = "blue_cup"
 _PINK_CUP_NAME = "pink_cup"
 _EE_BODY_NAME = "panda_hand"
+_PANDA_BASE_JOINT_NAME = "panda_joint1"
 
 _GRIPPER_OPEN = 1.0
 _GRIPPER_CLOSE = -1.0
 
 _MAX_CARTESIAN_DELTA = 0.018
 _MAX_ROT_DELTA = 0.08
+_MAX_BASE_JOINT_DELTA = 0.01
+_MAX_BASE_JOINT_OFFSET = 0.12
+_BASE_JOINT_TARGET_GAIN = 0.15
 
 _HOVER_Z_OFFSET = 0.15
 _GRASP_Z_OFFSET = 0.08
@@ -28,6 +32,7 @@ _LIFT_Z_OFFSET = 0.2
 _RELEASE_Z_OFFSET = 0.09
 _GRIPPER_DOWN_ROLL_W = math.pi
 _GRIPPER_DOWN_PITCH_W = 0.0
+_GRIPPER_DOWN_YAW_OFFSET_RANGE = (-0.3, 0.3)
 
 _SUCCESS_X_RANGE = (-0.05, 0.05)
 _SUCCESS_Y_RANGE = (-0.05, 0.05)
@@ -96,6 +101,7 @@ class CupStackingStateMachine(StateMachineBase):
         self._step_count: int = 0
         self._episode_done: bool = False
         self._ee_body_idx: int = -1
+        self._base_joint_idx: int = -1
         self._initial_ee_pos_w: torch.Tensor | None = None
         self._rest_ee_pos_w: torch.Tensor | None = None
         self._rest_joint_pos: torch.Tensor | None = None
@@ -105,6 +111,7 @@ class CupStackingStateMachine(StateMachineBase):
         self._pink_stack_target_w: torch.Tensor | None = None
         self._pink_retreat_target_w: torch.Tensor | None = None
         self._gripper_down_yaw_w: torch.Tensor | None = None
+        self._gripper_down_yaw_offset_w: torch.Tensor | None = None
         self._event: int = 0
         self._events_dt = [
             160,  # Phase 0: Move above the blue cup
@@ -125,6 +132,11 @@ class CupStackingStateMachine(StateMachineBase):
         robot = env.scene["robot"]
         self._ee_body_idx = _find_body_index(robot, _EE_BODY_NAME)
         joint_names = list(robot.data.joint_names)
+        if _PANDA_BASE_JOINT_NAME not in joint_names:
+            raise ValueError(
+                f"Could not find required joint '{_PANDA_BASE_JOINT_NAME}' in Franka joints: {joint_names}"
+            )
+        self._base_joint_idx = joint_names.index(_PANDA_BASE_JOINT_NAME)
 
         self._rest_joint_pos = torch.zeros(env.num_envs, len(joint_names), device=env.device)
         for idx, name in enumerate(joint_names):
@@ -251,6 +263,7 @@ class CupStackingStateMachine(StateMachineBase):
         self._pink_stack_target_w = None
         self._pink_retreat_target_w = None
         self._gripper_down_yaw_w = None
+        self._gripper_down_yaw_offset_w = None
 
     # ------------------------------------------------------------------
     def _ee_pos_w(self, robot) -> torch.Tensor:
@@ -281,14 +294,38 @@ class CupStackingStateMachine(StateMachineBase):
         delta_rot_w = axis_angle_from_quat(delta_quat_w)
         delta_rot_root = _clamp_delta(quat_apply(root_quat_inv, delta_rot_w), _MAX_ROT_DELTA)
 
-        base_joint_delta = torch.zeros(env.num_envs, 1, device=env.device, dtype=delta_pos_root.dtype)
+        base_joint_delta = self._base_joint_delta(robot, target_pos_root)
         return torch.cat([delta_pos_root, delta_rot_root, base_joint_delta, gripper_cmd], dim=-1)
+
+    def _base_joint_delta(self, robot, target_pos_root: torch.Tensor) -> torch.Tensor:
+        if self._base_joint_idx < 0:
+            raise RuntimeError("CupStackingStateMachine.setup() must run before requesting actions.")
+
+        target_heading = torch.atan2(target_pos_root[:, 1], target_pos_root[:, 0])
+        desired_base_joint = torch.clamp(
+            target_heading * _BASE_JOINT_TARGET_GAIN,
+            min=-_MAX_BASE_JOINT_OFFSET,
+            max=_MAX_BASE_JOINT_OFFSET,
+        )
+        current_base_joint = robot.data.joint_pos[:, self._base_joint_idx].to(dtype=target_pos_root.dtype)
+        base_joint_delta = desired_base_joint - current_base_joint
+        base_joint_delta = torch.clamp(
+            base_joint_delta,
+            min=-_MAX_BASE_JOINT_DELTA,
+            max=_MAX_BASE_JOINT_DELTA,
+        )
+        return base_joint_delta.unsqueeze(-1)
 
     def _gripper_down_quat_w(
         self, robot, num_envs: int, device: torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
         if self._gripper_down_yaw_w is None or self._gripper_down_yaw_w.shape[0] != num_envs:
-            self._gripper_down_yaw_w = self._current_hand_heading_yaw_w(robot).clone()
+            base_yaw = self._current_hand_heading_yaw_w(robot).to(device=device, dtype=dtype)
+            self._gripper_down_yaw_offset_w = torch.empty(num_envs, device=device, dtype=dtype).uniform_(
+                _GRIPPER_DOWN_YAW_OFFSET_RANGE[0],
+                _GRIPPER_DOWN_YAW_OFFSET_RANGE[1],
+            )
+            self._gripper_down_yaw_w = (base_yaw + self._gripper_down_yaw_offset_w).clone()
 
         roll = torch.full((num_envs,), _GRIPPER_DOWN_ROLL_W, device=device, dtype=dtype)
         pitch = torch.full((num_envs,), _GRIPPER_DOWN_PITCH_W, device=device, dtype=dtype)
