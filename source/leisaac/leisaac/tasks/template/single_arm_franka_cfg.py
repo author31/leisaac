@@ -153,10 +153,9 @@ class SingleArmFrankaObservationsCfg:
 
 @configclass
 class SingleArmFrankaActionsCfg:
-    """Action configuration for Franka keyboard/gamepad teleoperation."""
+    """Joint-space action configuration for Franka teleoperation."""
 
     arm_action: mdp.ActionTermCfg = MISSING
-    base_action: mdp.ActionTermCfg = MISSING
     gripper_action: mdp.ActionTermCfg = MISSING
 
 
@@ -220,16 +219,11 @@ class SingleArmFrankaTaskEnvCfg(ManagerBasedRLEnvCfg):
         if teleop_device not in ["keyboard", "gamepad"]:
             raise ValueError(f"Franka teleoperation only supports keyboard/gamepad, got '{teleop_device}'.")
 
-        self.actions.arm_action = mdp.DifferentialInverseKinematicsActionCfg(
+        self.actions.arm_action = mdp.JointPositionActionCfg(
             asset_name="robot",
-            joint_names=["panda_joint[2-7]"],
-            body_name="panda_hand",
-            controller=mdp.DifferentialIKControllerCfg(command_type="pose", ik_method="dls", use_relative_mode=True),
-        )
-        self.actions.base_action = mdp.RelativeJointPositionActionCfg(
-            asset_name="robot",
-            joint_names=["panda_joint1"],
+            joint_names=["panda_joint.*"],
             scale=1.0,
+            use_default_offset=False,
         )
         self.actions.gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="robot",

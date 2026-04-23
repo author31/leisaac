@@ -5,7 +5,14 @@ from __future__ import annotations
 import math
 
 import torch
-from isaaclab.utils.math import axis_angle_from_quat, quat_apply, quat_from_euler_xyz, quat_inv, quat_mul
+from isaaclab.utils.math import (
+    axis_angle_from_quat,
+    matrix_from_quat,
+    quat_apply,
+    quat_from_euler_xyz,
+    quat_inv,
+    quat_mul,
+)
 
 from .base import StateMachineBase
 
@@ -15,16 +22,22 @@ from .base import StateMachineBase
 _BLUE_CUP_NAME = "blue_cup"
 _PINK_CUP_NAME = "pink_cup"
 _EE_BODY_NAME = "panda_hand"
-_PANDA_BASE_JOINT_NAME = "panda_joint1"
+_FRANKA_ARM_JOINT_NAMES = (
+    "panda_joint1",
+    "panda_joint2",
+    "panda_joint3",
+    "panda_joint4",
+    "panda_joint5",
+    "panda_joint6",
+    "panda_joint7",
+)
 
 _GRIPPER_OPEN = 1.0
 _GRIPPER_CLOSE = -1.0
 
 _MAX_CARTESIAN_DELTA = 0.018
 _MAX_ROT_DELTA = 0.08
-_MAX_BASE_JOINT_DELTA = 0.01
-_MAX_BASE_JOINT_OFFSET = 0.12
-_BASE_JOINT_TARGET_GAIN = 0.15
+_IK_DLS_LAMBDA = 0.01
 
 _HOVER_Z_OFFSET = 0.15
 _GRASP_Z_OFFSET = 0.08
@@ -32,7 +45,7 @@ _LIFT_Z_OFFSET = 0.2
 _RELEASE_Z_OFFSET = 0.09
 _GRIPPER_DOWN_ROLL_W = math.pi
 _GRIPPER_DOWN_PITCH_W = 0.0
-_GRIPPER_DOWN_YAW_OFFSET_RANGE = (-0.3, 0.3)
+_GRIPPER_DOWN_YAW_OFFSET_RANGE = (-0.15, 0.15)
 
 _SUCCESS_X_RANGE = (-0.05, 0.05)
 _SUCCESS_Y_RANGE = (-0.05, 0.05)
@@ -88,11 +101,11 @@ class CupStackingStateMachine(StateMachineBase):
     configured with the Franka keyboard/gamepad action setup, the action vector
     is:
 
-    ``[dx, dy, dz, drot_x, drot_y, drot_z, d_panda_joint1, gripper]``.
+    ``[panda_joint1, ..., panda_joint7, gripper]``.
 
     This state machine therefore tracks world-space waypoints internally and
-    emits clipped relative position and rotation-vector deltas in the robot-root
-    frame.
+    converts clipped end-effector pose errors into joint-position targets before
+    returning actions.
     """
 
     MAX_STEPS: int = 720
@@ -101,7 +114,9 @@ class CupStackingStateMachine(StateMachineBase):
         self._step_count: int = 0
         self._episode_done: bool = False
         self._ee_body_idx: int = -1
-        self._base_joint_idx: int = -1
+        self._jacobi_body_idx: int = -1
+        self._arm_joint_ids: list[int] = []
+        self._jacobi_joint_ids: list[int] = []
         self._initial_ee_pos_w: torch.Tensor | None = None
         self._rest_ee_pos_w: torch.Tensor | None = None
         self._rest_joint_pos: torch.Tensor | None = None
@@ -119,7 +134,7 @@ class CupStackingStateMachine(StateMachineBase):
             20,  # Phase 2: Close gripper to grasp
             100,  # Phase 3: Lift blue cup upward
             85,  # Phase 4: Move blue cup above the pink cup
-            30,  # Phase 5: Lower/place and release
+            35,  # Phase 5: Lower/place and release
             30,  # Phase 6: Move up and away
         ]
 
@@ -132,11 +147,21 @@ class CupStackingStateMachine(StateMachineBase):
         robot = env.scene["robot"]
         self._ee_body_idx = _find_body_index(robot, _EE_BODY_NAME)
         joint_names = list(robot.data.joint_names)
-        if _PANDA_BASE_JOINT_NAME not in joint_names:
-            raise ValueError(
-                f"Could not find required joint '{_PANDA_BASE_JOINT_NAME}' in Franka joints: {joint_names}"
-            )
-        self._base_joint_idx = joint_names.index(_PANDA_BASE_JOINT_NAME)
+        missing_joint_names = [
+            joint_name for joint_name in _FRANKA_ARM_JOINT_NAMES if joint_name not in joint_names
+        ]
+        if missing_joint_names:
+            raise ValueError(f"Could not find required Franka joints {missing_joint_names} in joints: {joint_names}")
+        self._arm_joint_ids = [joint_names.index(joint_name) for joint_name in _FRANKA_ARM_JOINT_NAMES]
+
+        if self._ee_body_idx < 0:
+            raise ValueError(f"Could not find required body '{_EE_BODY_NAME}' in Franka bodies.")
+        if robot.is_fixed_base:
+            self._jacobi_body_idx = self._ee_body_idx - 1
+            self._jacobi_joint_ids = self._arm_joint_ids
+        else:
+            self._jacobi_body_idx = self._ee_body_idx
+            self._jacobi_joint_ids = [joint_id + 6 for joint_id in self._arm_joint_ids]
 
         self._rest_joint_pos = torch.zeros(env.num_envs, len(joint_names), device=env.device)
         for idx, name in enumerate(joint_names):
@@ -197,7 +222,7 @@ class CupStackingStateMachine(StateMachineBase):
         else:
             target_pos_w, gripper_cmd = self._phase_lift_away(pink_cup_pos_w, num_envs, device)
 
-        return self._relative_franka_action(env, target_pos_w, target_quat_w, gripper_cmd)
+        return self._joint_position_franka_action(env, target_pos_w, target_quat_w, gripper_cmd)
 
     def _phase_move_above_target(self, blue_cup_pos_w, num_envs, device):
         target_pos_w = blue_cup_pos_w.clone()
@@ -274,7 +299,7 @@ class CupStackingStateMachine(StateMachineBase):
         body_idx = self._ee_body_idx if self._ee_body_idx >= 0 else -1
         return robot.data.body_quat_w[:, body_idx, :]
 
-    def _relative_franka_action(
+    def _joint_position_franka_action(
         self,
         env,
         target_pos_w: torch.Tensor,
@@ -294,27 +319,49 @@ class CupStackingStateMachine(StateMachineBase):
         delta_rot_w = axis_angle_from_quat(delta_quat_w)
         delta_rot_root = _clamp_delta(quat_apply(root_quat_inv, delta_rot_w), _MAX_ROT_DELTA)
 
-        base_joint_delta = self._base_joint_delta(robot, target_pos_root)
-        return torch.cat([delta_pos_root, delta_rot_root, base_joint_delta, gripper_cmd], dim=-1)
+        pose_delta_root = torch.cat([delta_pos_root, delta_rot_root], dim=-1)
+        joint_pos_target = self._arm_joint_pos(robot) + self._compute_delta_joint_pos(
+            pose_delta_root, self._ee_jacobian_root(robot)
+        )
+        joint_pos_target = self._clamp_arm_joint_pos(robot, joint_pos_target)
+        return torch.cat([joint_pos_target, gripper_cmd], dim=-1)
 
-    def _base_joint_delta(self, robot, target_pos_root: torch.Tensor) -> torch.Tensor:
-        if self._base_joint_idx < 0:
+    def _arm_joint_pos(self, robot) -> torch.Tensor:
+        if not self._arm_joint_ids:
+            raise RuntimeError("CupStackingStateMachine.setup() must run before requesting actions.")
+        return robot.data.joint_pos[:, self._arm_joint_ids]
+
+    def _ee_jacobian_root(self, robot) -> torch.Tensor:
+        if self._jacobi_body_idx < 0 or not self._jacobi_joint_ids:
             raise RuntimeError("CupStackingStateMachine.setup() must run before requesting actions.")
 
-        target_heading = torch.atan2(target_pos_root[:, 1], target_pos_root[:, 0])
-        desired_base_joint = torch.clamp(
-            target_heading * _BASE_JOINT_TARGET_GAIN,
-            min=-_MAX_BASE_JOINT_OFFSET,
-            max=_MAX_BASE_JOINT_OFFSET,
+        jacobian = robot.root_physx_view.get_jacobians()[
+            :, self._jacobi_body_idx, :, self._jacobi_joint_ids
+        ].clone()
+        root_rot_matrix = matrix_from_quat(quat_inv(robot.data.root_quat_w))
+        jacobian[:, :3, :] = torch.bmm(root_rot_matrix, jacobian[:, :3, :])
+        jacobian[:, 3:, :] = torch.bmm(root_rot_matrix, jacobian[:, 3:, :])
+        return jacobian
+
+    def _compute_delta_joint_pos(self, pose_delta: torch.Tensor, jacobian: torch.Tensor) -> torch.Tensor:
+        jacobian_t = torch.transpose(jacobian, dim0=1, dim1=2)
+        lambda_matrix = (_IK_DLS_LAMBDA**2) * torch.eye(
+            jacobian.shape[1], device=jacobian.device, dtype=jacobian.dtype
         )
-        current_base_joint = robot.data.joint_pos[:, self._base_joint_idx].to(dtype=target_pos_root.dtype)
-        base_joint_delta = desired_base_joint - current_base_joint
-        base_joint_delta = torch.clamp(
-            base_joint_delta,
-            min=-_MAX_BASE_JOINT_DELTA,
-            max=_MAX_BASE_JOINT_DELTA,
+        delta_joint_pos = (
+            jacobian_t @ torch.inverse(jacobian @ jacobian_t + lambda_matrix) @ pose_delta.unsqueeze(-1)
         )
-        return base_joint_delta.unsqueeze(-1)
+        return delta_joint_pos.squeeze(-1)
+
+    def _clamp_arm_joint_pos(self, robot, joint_pos: torch.Tensor) -> torch.Tensor:
+        joint_pos_limits = getattr(robot.data, "soft_joint_pos_limits", None)
+        if joint_pos_limits is None:
+            joint_pos_limits = getattr(robot.data, "joint_pos_limits", None)
+        if joint_pos_limits is None:
+            return joint_pos
+
+        arm_joint_pos_limits = joint_pos_limits[:, self._arm_joint_ids, :]
+        return torch.clamp(joint_pos, arm_joint_pos_limits[..., 0], arm_joint_pos_limits[..., 1])
 
     def _gripper_down_quat_w(
         self, robot, num_envs: int, device: torch.device, dtype: torch.dtype

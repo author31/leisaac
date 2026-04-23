@@ -434,6 +434,8 @@ def main():
     controller = Controller()
     controller.reset()
 
+    setup_dual_viewports()
+
 
     success_count, episode_count = 0, 1
     while max_episode_count <= 0 or episode_count <= max_episode_count:
