@@ -39,6 +39,12 @@ parser.add_argument(
         "'bi_so101_state_machine'. If not set, inferred from the task name."
     ),
 )
+parser.add_argument(
+    "--object_poses_path",
+    type=str,
+    required=True,
+    help="Path to the required object pose file for the MVP replay flow.",
+)
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -56,6 +62,7 @@ from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.utils.datasets import EpisodeData, HDF5DatasetFileHandler
 from isaaclab_tasks.utils import parse_env_cfg
 from leisaac.utils.env_utils import get_task_type
+from leisaac.utils.object_pose_config import set_required_object_poses_path
 
 import leisaac  # noqa: F401
 
@@ -120,6 +127,7 @@ def main():
     task_type = get_task_type(args_cli.task, args_cli.task_type)
 
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=num_envs)
+    set_required_object_poses_path(env_cfg, args_cli.object_poses_path, "State machine replay")
     env_cfg.use_teleop_device(task_type)
     env_cfg.recorders = {}
     env_cfg.terminations = {}

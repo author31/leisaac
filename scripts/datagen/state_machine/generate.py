@@ -38,6 +38,12 @@ parser.add_argument("--quality", action="store_true", help="Whether to enable qu
 parser.add_argument("--use_lerobot_recorder", action="store_true", help="Whether to use lerobot recorder.")
 parser.add_argument("--lerobot_dataset_repo_id", type=str, default=None, help="Lerobot Dataset repository ID.")
 parser.add_argument("--lerobot_dataset_fps", type=int, default=30, help="Lerobot Dataset frames per second.")
+parser.add_argument(
+    "--object_poses_path",
+    type=str,
+    required=True,
+    help="Path to the required object pose file for the MVP data-generation flow.",
+)
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -55,6 +61,7 @@ from isaaclab_tasks.utils import parse_env_cfg
 from leisaac.datagen.state_machine import PickOrangeStateMachine
 from leisaac.enhance.managers import EnhanceDatasetExportMode, StreamingRecorderManager
 from leisaac.utils.env_utils import dynamic_reset_gripper_effort_limit_sim
+from leisaac.utils.object_pose_config import set_required_object_poses_path
 
 # Maps gym task id → (StateMachineClass, device_type)
 TASK_REGISTRY = {
@@ -230,6 +237,7 @@ def main():
         os.makedirs(output_dir)
 
     env_cfg = parse_env_cfg(task_name, device=args_cli.device, num_envs=args_cli.num_envs)
+    set_required_object_poses_path(env_cfg, args_cli.object_poses_path, "State machine datagen")
     env_cfg.use_teleop_device(device)
     env_cfg.seed = args_cli.seed if args_cli.seed is not None else int(time.time())
 

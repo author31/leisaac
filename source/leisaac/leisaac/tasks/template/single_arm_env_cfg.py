@@ -168,6 +168,9 @@ class SingleArmTaskEnvCfg(ManagerBasedRLEnvCfg):
     dynamic_reset_gripper_effort_limit: bool = True
     """Whether to dynamically reset the gripper effort limit."""
 
+    object_poses_path: str | None = None
+    """Path to the object pose file used by MVP pose-injected workflows."""
+
     robot_name: str = "so101_follower"
     """Robot name for lerobot dataset export."""
     default_feature_joint_names: list[str] = MISSING
