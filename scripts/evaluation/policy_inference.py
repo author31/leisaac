@@ -36,6 +36,12 @@ parser.add_argument("--policy_timeout_ms", type=int, default=15000, help="Timeou
 parser.add_argument("--policy_action_horizon", type=int, default=16, help="Action horizon of the policy.")
 parser.add_argument("--policy_language_instruction", type=str, default=None, help="Language instruction of the policy.")
 parser.add_argument("--policy_checkpoint_path", type=str, default=None, help="Checkpoint path of the policy.")
+parser.add_argument(
+    "--object_poses_path",
+    type=str,
+    required=True,
+    help="Path to the required object pose file for the MVP evaluation flow.",
+)
 
 
 # append AppLauncher cli args
@@ -61,6 +67,7 @@ from leisaac.utils.env_utils import (
     dynamic_reset_gripper_effort_limit_sim,
     get_task_type,
 )
+from leisaac.utils.object_pose_config import set_required_object_poses_path
 
 import leisaac  # noqa: F401
 
@@ -134,6 +141,7 @@ def main():
     """Running lerobot teleoperation with leisaac manipulation environment."""
 
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
+    set_required_object_poses_path(env_cfg, args_cli.object_poses_path, "Policy evaluation")
     task_type = get_task_type(args_cli.task)
     env_cfg.use_teleop_device(task_type)
     env_cfg.seed = args_cli.seed if args_cli.seed is not None else int(time.time())

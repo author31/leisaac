@@ -60,6 +60,8 @@ _build
 
 # Tests
 tests/
+!source/leisaac/tests/
+!source/leisaac/tests/test_object_pose_config.py
 
 # Docker history
 .isaac-lab-docker-history
